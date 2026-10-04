@@ -117,13 +117,17 @@ public class EmbeddedKafkaSupervisorTest extends EmbeddedClusterTestBase
     Assertions.assertEquals("RUNNING", supervisorStatus.getState());
     Assertions.assertEquals(topic, supervisorStatus.getSource());
 
-    // Get the task statuses
+    // Get the active task statuses. With a 500ms task duration, the supervisor may have already
+    // rolled over to a new task while the previous one is still publishing, so do not assume
+    // that exactly one task is active.
     List<TaskStatusPlus> taskStatuses = ImmutableList.copyOf(
         (CloseableIterator<TaskStatusPlus>)
-            cluster.callApi().onLeaderOverlord(o -> o.taskStatuses(null, dataSource, 1))
+            cluster.callApi().onLeaderOverlord(o -> o.taskStatuses(null, dataSource, 0))
     );
-    Assertions.assertEquals(1, taskStatuses.size());
-    Assertions.assertEquals(TaskState.RUNNING, taskStatuses.get(0).getStatusCode());
+    Assertions.assertFalse(taskStatuses.isEmpty());
+    for (TaskStatusPlus taskStatus : taskStatuses) {
+      Assertions.assertEquals(TaskState.RUNNING, taskStatus.getStatusCode());
+    }
 
     // Wait until all produced records have been ingested before verifying the row count,
     // otherwise the query below can race ingestion and observe fewer than the expected rows
