@@ -42,9 +42,10 @@ public class ScheduledExecutorsTest
     ScheduledExecutorService exec = Execs.scheduledSingleThreaded("testFixedDelay--%d");
 
     List<Long> taskStartTimes = new ArrayList<>();
+    List<Long> taskEndTimes = new ArrayList<>();
     AtomicInteger executionCount = new AtomicInteger(0);
     CountDownLatch latch = new CountDownLatch(1);
-    long startTime = System.currentTimeMillis();
+    long startTime = System.nanoTime();
 
     ScheduledExecutors.scheduleWithFixedDelay(
         exec,
@@ -52,14 +53,15 @@ public class ScheduledExecutorsTest
         delay,
         () -> {
           try {
-            long taskStart = System.currentTimeMillis();
+            long taskStart = System.nanoTime();
             int count = executionCount.getAndIncrement();
-            synchronized (taskStartTimes) {
-              taskStartTimes.add(taskStart);
-            }
 
             // Each task takes 100ms
             Thread.sleep(taskDuration);
+            synchronized (taskStartTimes) {
+              taskStartTimes.add(taskStart);
+              taskEndTimes.add(System.nanoTime());
+            }
 
             if (count == 3) {
               latch.countDown();
@@ -78,18 +80,18 @@ public class ScheduledExecutorsTest
     Assertions.assertTrue(completed, "Should complete within timeout");
     Assertions.assertEquals(4, executionCount.get(), "Should have exactly 4 executions");
 
-    // Verify first task starts at approximately the initial delay, in real life this is greater than 100ms due to overhead.
-    long firstTaskStart = taskStartTimes.get(0) - startTime;
+    // Verify first task starts at approximately the initial delay. Measured with nanoTime, the clock the executor
+    // schedules on, it cannot be below 100ms, while currentTimeMillis can report exactly 100ms.
+    long firstTaskStart = TimeUnit.NANOSECONDS.toMillis(taskStartTimes.get(0) - startTime);
     Assertions.assertTrue(
-        firstTaskStart > 100 && firstTaskStart < 500,
+        firstTaskStart >= 100 && firstTaskStart < 500,
         "First task should start at approximately initial delay (100ms), was: " + firstTaskStart
     );
 
     // Verify subsequent tasks wait for delay from previous task end
-    // Task ends at: taskStart + taskDuration
+    // Use the recorded end of the previous task, since Thread.sleep(taskDuration) can overshoot
     for (int i = 1; i < taskStartTimes.size(); i++) {
-      long previousTaskEnd = taskStartTimes.get(i - 1) + taskDuration;
-      long delayBetweenTasks = taskStartTimes.get(i) - previousTaskEnd;
+      long delayBetweenTasks = TimeUnit.NANOSECONDS.toMillis(taskStartTimes.get(i) - taskEndTimes.get(i - 1));
       // Should be approximately 500ms (the delay between task end and next task start)
       Assertions.assertTrue(
           delayBetweenTasks >= 450 && delayBetweenTasks <= 650,
