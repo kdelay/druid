@@ -163,10 +163,12 @@ class QueryVirtualStorageTest extends EmbeddedClusterTestBase
         RuntimeException.class,
         () -> cluster.runSql("select count(*) from \"%s\"", dataSource)
     );
-    Assertions.assertTrue(t.getMessage().contains("Unable to reserve bundle"));
-    Assertions.assertTrue(t.getMessage()
-                           .contains(
-                               "ensure enough disk space has been allocated to load all segments involved in the query"));
+    // Which reservation runs out of space first depends on load thread timing, so the error can come from the
+    // partial metadata, the bundle, or the full segment reservation. All of them include this phrase.
+    Assertions.assertTrue(
+        t.getMessage().contains("ensure enough disk space has been allocated"),
+        t.getMessage()
+    );
   }
 
   @Test
